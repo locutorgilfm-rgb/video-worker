@@ -7,12 +7,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// health check
+// =============================
+// HEALTH
+// =============================
 app.get("/health", (req, res) => {
   res.send("OK");
 });
 
-// rota principal
+// =============================
+// ROTA PRINCIPAL
+// =============================
 app.post("/extract-audio", async (req, res) => {
   try {
     const { videoUrl } = req.body;
@@ -22,7 +26,7 @@ app.post("/extract-audio", async (req, res) => {
     }
 
     // =============================
-    // 1. TRANSCRIÇÃO COM TIMESTAMP
+    // 1. TRANSCRIÇÃO (WHISPER)
     // =============================
     const transcription = await axios.post(
       "https://api.openai.com/v1/audio/transcriptions",
@@ -39,40 +43,55 @@ app.post("/extract-audio", async (req, res) => {
       }
     );
 
-    const segments = transcription.data.segments;
+    const segments = transcription.data.segments || [];
 
     // =============================
-    // 2. LEGENDAS ESTILO REELS
+    // 2. LIMITAR DURAÇÃO REAL
+    // =============================
+    const MAX_DURATION = 60; // segurança (ajuste se quiser)
+
+    // =============================
+    // 3. GERAR LEGENDAS
     // =============================
     const subtitles = segments.map(seg => {
-      const words = seg.text.split(" ");
+      const words = seg.text.trim().split(" ");
 
-      // quebra em blocos de 3 palavras
+      // quebra em blocos menores
       const chunks = [];
-      for (let i = 0; i < words.length; i += 3) {
-        chunks.push(words.slice(i, i + 3).join(" "));
+      for (let i = 0; i < words.length; i += 2) {
+        chunks.push(words.slice(i, i + 2).join(" "));
       }
 
-      const durationPerChunk = (seg.end - seg.start) / chunks.length;
+      const segDuration = Math.max(0.5, seg.end - seg.start);
+      const chunkDuration = segDuration / chunks.length;
 
-      return chunks.map((chunk, index) => ({
-        asset: {
-          type: "title",
-          text: chunk.toUpperCase(),
-          style: "blockbuster",
-          size: "medium",
-          color: "#ffffff",
-          stroke: "black",
-          background: "rgba(0,0,0,0.6)"
-        },
-        start: seg.start + (index * durationPerChunk),
-        length: durationPerChunk,
-        position: "bottom"
-      }));
-    }).flat();
+      return chunks.map((chunk, index) => {
+        let start = seg.start + (index * chunkDuration);
+
+        // trava dentro da duração máxima
+        if (start >= MAX_DURATION) return null;
+
+        return {
+          asset: {
+            type: "title",
+            text: chunk.toUpperCase(),
+            style: "minimal",
+            size: "small",
+            color: "#FFFFFF",
+            stroke: "#000000",
+            background: "rgba(0,0,0,0.4)"
+          },
+          start: start,
+          length: Math.min(chunkDuration, MAX_DURATION - start),
+          position: "bottom"
+        };
+      });
+    })
+    .flat()
+    .filter(Boolean);
 
     // =============================
-    // 3. CLIP DO VÍDEO
+    // 4. CLIP DO VÍDEO (SEM TRAVAR TEMPO)
     // =============================
     const videoClip = {
       asset: {
@@ -80,13 +99,12 @@ app.post("/extract-audio", async (req, res) => {
         src: videoUrl
       },
       start: 0,
-      length: 60,
       fit: "contain",
       position: "center"
     };
 
     // =============================
-    // 4. SHOTSTACK
+    // 5. SHOTSTACK
     // =============================
     const shotstackResponse = await axios.post(
       "https://api.shotstack.io/v1/render",
