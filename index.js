@@ -22,7 +22,7 @@ function updateJob(id, data) {
 function generateDynamicCuts(duration) {
   const cuts = [];
   let current = 0;
-  const CUT_DURATION = 4; // 4s cada corte
+  const CUT_DURATION = 4;
 
   while (current < duration) {
     cuts.push({
@@ -41,8 +41,7 @@ async function processVideo(jobId, videoUrl) {
   try {
     console.log("🎬 Iniciando processamento...");
 
-    // duração fixa por enquanto (depois podemos automatizar)
-    const duration = 40;
+    const duration = 41; // 🔥 agora alinhado com seu vídeo
 
     const cuts = generateDynamicCuts(duration);
 
@@ -59,7 +58,7 @@ async function processVideo(jobId, videoUrl) {
     }));
 
     const response = await axios.post(
-      "https://api.shotstack.io/v1/render",
+      "https://api.shotstack.io/edit/v1/render",
       {
         timeline: {
           background: "#000000",
@@ -71,8 +70,7 @@ async function processVideo(jobId, videoUrl) {
         },
         output: {
           format: "mp4",
-          aspectRatio: "9:16",
-          resolution: "1080x1920"
+          aspectRatio: "9:16"
         }
       },
       {
@@ -93,10 +91,10 @@ async function processVideo(jobId, videoUrl) {
     pollRender(jobId, renderId);
 
   } catch (err) {
-    console.error(err.response?.data || err.message);
+    console.error("❌ ERRO:", err.response?.data || err.message);
     updateJob(jobId, {
       status: "failed",
-      error: err.message
+      error: err.response?.data || err.message
     });
   }
 }
@@ -106,7 +104,7 @@ function pollRender(jobId, renderId) {
   setTimeout(async () => {
     try {
       const res = await axios.get(
-        `https://api.shotstack.io/v1/render/${renderId}`,
+        `https://api.shotstack.io/edit/v1/render/${renderId}`,
         {
           headers: {
             "x-api-key": process.env.SHOTSTACK_API_KEY
@@ -123,7 +121,8 @@ function pollRender(jobId, renderId) {
         });
       } else if (status === "failed") {
         updateJob(jobId, {
-          status: "failed"
+          status: "failed",
+          error: res.data
         });
       } else {
         pollRender(jobId, renderId);
