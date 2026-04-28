@@ -2,6 +2,11 @@ const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 const FormData = require("form-data");
+const { execSync } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
@@ -10,7 +15,6 @@ app.use(express.json({ limit: "50mb" }));
 // JOBS EM MEMÓRIA (sem banco)
 // =============================
 const jobs = new Map();
-// { jobId: { status, renderId, url, error, createdAt } }
 
 function createJob() {
   const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -29,7 +33,6 @@ function updateJob(jobId, data) {
   if (job) jobs.set(jobId, { ...job, ...data });
 }
 
-// Limpa jobs antigos (mais de 1 hora) pra não vazar memória
 setInterval(() => {
   const oneHourAgo = Date.now() - 60 * 60 * 1000;
   for (const [id, job] of jobs.entries()) {
@@ -46,8 +49,8 @@ const CONFIG = {
   MIN_CHUNK_DURATION: 0.25,
   MAX_CHUNK_DURATION: 2.0,
   SUBTITLE_POSITION: "bottom",
-  POLLING_INTERVAL: 5000,     // ms entre cada check no Shotstack
-  MAX_POLLING_ATTEMPTS: 60    // 60 x 5s = 5 minutos máximo
+  POLLING_INTERVAL: 5000,
+  MAX_POLLING_ATTEMPTS: 60
 };
 
 const HIGHLIGHT_WORDS = new Set([
@@ -88,35 +91,60 @@ async function downloadVideoBuffer(url) {
 }
 
 // =============================
-// WHISPER
+// WHISPER COM FFMPEG
 // =============================
 async function transcribeVideo(videoBuffer) {
-  const form = new FormData();
-  form.append("file", videoBuffer, {
-    filename: "audio.mp4",   // força mp4 — aceita MOV, MP4, etc
-    contentType: "video/mp4"
-  });
-  form.append("model", "whisper-1");
-  form.append("response_format", "verbose_json");
-  form.append("timestamp_granularities[]", "word");
-  form.append("timestamp_granularities[]", "segment");
+  const tmpDir = os.tmpdir();
+  const videoPath = path.join(tmpDir, `video_${Date.now()}.mp4`);
+  const audioPath = path.join(tmpDir, `audio_${Date.now()}.mp3`);
 
-  const response = await axios.post(
-    "https://api.openai.com/v1/audio/transcriptions",
-    form,
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        ...form.getHeaders()
-      },
-      maxBodyLength: Infinity,
-      timeout: 180000  // 3 minutos pro Whisper
-    }
-  );
+  try {
+    // Salva vídeo no disco temporário
+    fs.writeFileSync(videoPath, videoBuffer);
+    console.log(`💾 Vídeo salvo em ${videoPath}`);
 
-  const data = response.data;
-  console.log(`📝 Whisper: ${data.words?.length || 0} words, ${data.segments?.length || 0} segments`);
-  return data;
+    // Extrai áudio com ffmpeg — reduz de 56MB para ~2MB
+    execSync(
+      `ffmpeg -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 32k "${audioPath}" -y`,
+      { timeout: 60000 }
+    );
+
+    const audioBuffer = fs.readFileSync(audioPath);
+    console.log(`🎵 Áudio extraído: ${(audioBuffer.length / 1024 / 1024).toFixed(1)}MB`);
+
+    // Manda só o áudio pro Whisper
+    const form = new FormData();
+    form.append("file", audioBuffer, {
+      filename: "audio.mp3",
+      contentType: "audio/mpeg"
+    });
+    form.append("model", "whisper-1");
+    form.append("response_format", "verbose_json");
+    form.append("timestamp_granularities[]", "word");
+    form.append("timestamp_granularities[]", "segment");
+
+    const response = await axios.post(
+      "https://api.openai.com/v1/audio/transcriptions",
+      form,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          ...form.getHeaders()
+        },
+        maxBodyLength: Infinity,
+        timeout: 180000
+      }
+    );
+
+    const data = response.data;
+    console.log(`📝 Whisper: ${data.words?.length || 0} words, ${data.segments?.length || 0} segments`);
+    return data;
+
+  } finally {
+    // Limpa arquivos temporários
+    try { fs.unlinkSync(videoPath); } catch {}
+    try { fs.unlinkSync(audioPath); } catch {}
+  }
 }
 
 // =============================
@@ -217,7 +245,7 @@ function buildSubtitlesFromSegments(segments) {
 }
 
 // =============================
-// POLLING DO SHOTSTACK (background)
+// POLLING DO SHOTSTACK
 // =============================
 async function pollShotstackUntilDone(jobId, renderId) {
   let attempts = 0;
@@ -244,7 +272,6 @@ async function pollShotstackUntilDone(jobId, renderId) {
         updateJob(jobId, { status: "failed", error: "Shotstack falhou" });
         console.log(`❌ Job ${jobId} falhou no Shotstack`);
       } else {
-        // ainda processando — agenda próximo check
         setTimeout(check, CONFIG.POLLING_INTERVAL);
       }
     } catch (err) {
@@ -263,19 +290,15 @@ async function processVideoInBackground(jobId, videoUrl, videoWidth, videoHeight
   try {
     console.log(`🚀 Iniciando job ${jobId}`);
 
-    // 1. Download
     console.log("⬇️ Baixando vídeo...");
     const { buffer } = await downloadVideoBuffer(videoUrl);
     console.log(`📦 ${(buffer.length / 1024 / 1024).toFixed(1)}MB baixados`);
 
-    // 2. Whisper
     console.log("🎙️ Transcrevendo...");
     const transcriptionData = await transcribeVideo(buffer);
 
-    // 3. Legendas
     const subtitles = buildReelsSubtitles(transcriptionData);
 
-    // 4. Duração real
     const realDuration = parseFloat(
       Math.min(
         transcriptionData.segments?.at(-1)?.end || CONFIG.MAX_VIDEO_DURATION,
@@ -284,10 +307,8 @@ async function processVideoInBackground(jobId, videoUrl, videoWidth, videoHeight
     );
     console.log(`⏱️ Duração real: ${realDuration}s`);
 
-    // 5. Aspect ratio
     const outputConfig = getAspectRatioConfig(videoWidth, videoHeight);
 
-    // 6. Shotstack
     const shotstackResponse = await axios.post(
       "https://api.shotstack.io/v1/render",
       {
@@ -326,7 +347,6 @@ async function processVideoInBackground(jobId, videoUrl, videoWidth, videoHeight
     updateJob(jobId, { renderId, status: "rendering" });
     console.log(`🎬 Render iniciado: ${renderId}`);
 
-    // 7. Polling em background
     pollShotstackUntilDone(jobId, renderId);
 
   } catch (err) {
@@ -343,7 +363,6 @@ async function processVideoInBackground(jobId, videoUrl, videoWidth, videoHeight
 // =============================
 app.get("/health", (req, res) => res.send("OK"));
 
-// POST — cria job e retorna jobId IMEDIATAMENTE
 app.post("/extract-audio", (req, res) => {
   const { videoUrl, videoWidth, videoHeight } = req.body;
   if (!videoUrl) return res.status(400).json({ error: "videoUrl obrigatório" });
@@ -351,26 +370,22 @@ app.post("/extract-audio", (req, res) => {
   const jobId = createJob();
   console.log(`📥 Novo job: ${jobId}`);
 
-  // Dispara em background — NÃO usa await
   processVideoInBackground(jobId, videoUrl, videoWidth, videoHeight);
 
-  // Retorna na hora — sem travar
   res.json({ success: true, jobId });
 });
 
-// GET — frontend consulta status aqui
 app.get("/job-status/:jobId", (req, res) => {
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: "Job não encontrado" });
 
   res.json({
-    status: job.status,   // "processing" | "rendering" | "done" | "failed"
-    url: job.url,         // URL do vídeo final (quando done)
-    error: job.error      // mensagem de erro (quando failed)
+    status: job.status,
+    url: job.url,
+    error: job.error
   });
 });
 
-// GET — mantém compatibilidade com rota antiga
 app.get("/render-status/:renderId", async (req, res) => {
   try {
     const response = await axios.get(
@@ -385,5 +400,4 @@ app.get("/render-status/:renderId", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Servidor na porta ${PORT}`)); 
- 
+app.listen(PORT, () => console.log(`🚀 Servidor na porta ${PORT}`));
