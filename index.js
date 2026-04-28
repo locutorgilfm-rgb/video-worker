@@ -17,19 +17,20 @@ app.get("/health", (req, res) => {
   res.send("OK");
 });
 
-// 🔥 TRANSCRIÇÃO REAL COM OPENAI
+// 🔥 ROTA PRINCIPAL (TRANSCRIÇÃO + RENDER)
 app.post("/extract-audio", async (req, res) => {
   try {
-    const { audioUrl } = req.body;
+    const { videoUrl } = req.body;
 
-    if (!audioUrl) {
-      return res.status(400).json({ error: "audioUrl obrigatório" });
+    if (!videoUrl) {
+      return res.status(400).json({ error: "videoUrl obrigatório" });
     }
 
-    const response = await axios.post(
+    // 🔥 1. TRANSCRIÇÃO COM OPENAI
+    const transcription = await axios.post(
       "https://api.openai.com/v1/audio/transcriptions",
       {
-        file: audioUrl,
+        file: videoUrl,
         model: "gpt-4o-mini-transcribe"
       },
       {
@@ -39,11 +40,67 @@ app.post("/extract-audio", async (req, res) => {
       }
     );
 
-    res.json(response.data);
+    const texto = transcription.data.text || "Legenda não gerada";
+
+    // 🔥 2. RENDER COM SHOTSTACK
+    const shotstack = await axios.post(
+      "https://api.shotstack.io/v1/render",
+      {
+        timeline: {
+          tracks: [
+            {
+              clips: [
+                {
+                  asset: {
+                    type: "video",
+                    src: videoUrl
+                  },
+                  start: 0,
+                  length: 20,
+                  fit: "cover"
+                }
+              ]
+            },
+            {
+              clips: [
+                {
+                  asset: {
+                    type: "title",
+                    text: texto,
+                    style: "minimal",
+                    size: "medium",
+                    color: "#ffffff",
+                    background: "rgba(0,0,0,0.7)"
+                  },
+                  start: 0,
+                  length: 20,
+                  position: "bottom"
+                }
+              ]
+            }
+          ]
+        },
+        output: {
+          format: "mp4",
+          resolution: "1080x1920"
+        }
+      },
+      {
+        headers: {
+          "x-api-key": process.env.SHOTSTACK_API_KEY,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    res.json({
+      transcription: texto,
+      render: shotstack.data
+    });
 
   } catch (err) {
     console.error("Erro:", err.response?.data || err.message);
-    res.status(500).json({ error: "Erro ao transcrever" });
+    res.status(500).json({ error: "Erro no processamento" });
   }
 });
 
