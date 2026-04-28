@@ -42,22 +42,34 @@ app.post("/extract-audio", async (req, res) => {
     const segments = transcription.data.segments;
 
     // =============================
-    // 2. LEGENDAS SINCRONIZADAS
+    // 2. LEGENDAS ESTILO REELS
     // =============================
-    const subtitles = segments.map(seg => ({
-      asset: {
-        type: "title",
-        text: seg.text.toUpperCase(),
-        style: "blockbuster",
-        size: "large",
-        color: "#ffffff",
-        stroke: "black",
-        background: "rgba(0,0,0,0.5)"
-      },
-      start: seg.start,
-      length: seg.end - seg.start,
-      position: "bottom"
-    }));
+    const subtitles = segments.map(seg => {
+      const words = seg.text.split(" ");
+
+      // quebra em blocos de 3 palavras
+      const chunks = [];
+      for (let i = 0; i < words.length; i += 3) {
+        chunks.push(words.slice(i, i + 3).join(" "));
+      }
+
+      const durationPerChunk = (seg.end - seg.start) / chunks.length;
+
+      return chunks.map((chunk, index) => ({
+        asset: {
+          type: "title",
+          text: chunk.toUpperCase(),
+          style: "blockbuster",
+          size: "medium",
+          color: "#ffffff",
+          stroke: "black",
+          background: "rgba(0,0,0,0.6)"
+        },
+        start: seg.start + (index * durationPerChunk),
+        length: durationPerChunk,
+        position: "bottom"
+      }));
+    }).flat();
 
     // =============================
     // 3. CLIP DO VÍDEO
@@ -74,7 +86,7 @@ app.post("/extract-audio", async (req, res) => {
     };
 
     // =============================
-    // 4. ENVIAR PARA SHOTSTACK
+    // 4. SHOTSTACK
     // =============================
     const shotstackResponse = await axios.post(
       "https://api.shotstack.io/v1/render",
