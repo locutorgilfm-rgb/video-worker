@@ -11,9 +11,6 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 
-// =============================
-// JOBS EM MEMÓRIA (sem banco)
-// =============================
 const jobs = new Map();
 
 function createJob() {
@@ -40,9 +37,6 @@ setInterval(() => {
   }
 }, 10 * 60 * 1000);
 
-// =============================
-// CONFIG
-// =============================
 const CONFIG = {
   MAX_VIDEO_DURATION: 90,
   WORDS_PER_CHUNK: 3,
@@ -75,9 +69,6 @@ function getAspectRatioConfig(width, height) {
   return { aspectRatio: "1:1", resolution: "1080x1080" };
 }
 
-// =============================
-// DOWNLOAD
-// =============================
 async function downloadVideoBuffer(url) {
   const response = await axios.get(url, {
     responseType: "arraybuffer",
@@ -90,20 +81,15 @@ async function downloadVideoBuffer(url) {
   };
 }
 
-// =============================
-// WHISPER COM FFMPEG
-// =============================
 async function transcribeVideo(videoBuffer) {
   const tmpDir = os.tmpdir();
   const videoPath = path.join(tmpDir, `video_${Date.now()}.mp4`);
   const audioPath = path.join(tmpDir, `audio_${Date.now()}.mp3`);
 
   try {
-    // Salva vídeo no disco temporário
     fs.writeFileSync(videoPath, videoBuffer);
     console.log(`💾 Vídeo salvo em ${videoPath}`);
 
-    // Extrai áudio com ffmpeg — reduz de 56MB para ~2MB
     execSync(
       `ffmpeg -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 32k "${audioPath}" -y`,
       { timeout: 60000 }
@@ -112,7 +98,6 @@ async function transcribeVideo(videoBuffer) {
     const audioBuffer = fs.readFileSync(audioPath);
     console.log(`🎵 Áudio extraído: ${(audioBuffer.length / 1024 / 1024).toFixed(1)}MB`);
 
-    // Manda só o áudio pro Whisper
     const form = new FormData();
     form.append("file", audioBuffer, {
       filename: "audio.mp3",
@@ -141,15 +126,12 @@ async function transcribeVideo(videoBuffer) {
     return data;
 
   } finally {
-    // Limpa arquivos temporários
     try { fs.unlinkSync(videoPath); } catch {}
     try { fs.unlinkSync(audioPath); } catch {}
   }
 }
 
-// =============================
-// LEGENDAS
-// =============================
+// ✅ SEM transition — corrige o Bad Request do Shotstack
 function buildSubtitleClip(text, start, duration, hasHighlight) {
   return {
     asset: {
@@ -163,8 +145,7 @@ function buildSubtitleClip(text, start, duration, hasHighlight) {
     },
     start: parseFloat(start.toFixed(3)),
     length: parseFloat(duration.toFixed(3)),
-    position: CONFIG.SUBTITLE_POSITION,
-    transition: { in: hasHighlight ? "zoom" : "fade", out: "fade" }
+    position: CONFIG.SUBTITLE_POSITION
   };
 }
 
@@ -244,9 +225,6 @@ function buildSubtitlesFromSegments(segments) {
   return subtitles;
 }
 
-// =============================
-// POLLING DO SHOTSTACK
-// =============================
 async function pollShotstackUntilDone(jobId, renderId) {
   let attempts = 0;
 
@@ -283,9 +261,6 @@ async function pollShotstackUntilDone(jobId, renderId) {
   setTimeout(check, CONFIG.POLLING_INTERVAL);
 }
 
-// =============================
-// PROCESSAMENTO EM BACKGROUND
-// =============================
 async function processVideoInBackground(jobId, videoUrl, videoWidth, videoHeight) {
   try {
     console.log(`🚀 Iniciando job ${jobId}`);
@@ -358,9 +333,6 @@ async function processVideoInBackground(jobId, videoUrl, videoWidth, videoHeight
   }
 }
 
-// =============================
-// ROTAS
-// =============================
 app.get("/health", (req, res) => res.send("OK"));
 
 app.post("/extract-audio", (req, res) => {
