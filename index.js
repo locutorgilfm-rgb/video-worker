@@ -7,17 +7,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// rota teste
-app.get("/", (req, res) => {
-  res.send("Worker rodando 🚀");
-});
-
 // health check
 app.get("/health", (req, res) => {
   res.send("OK");
 });
 
-// 🔥 ROTA PRINCIPAL (TRANSCRIÇÃO + RENDER)
+// rota principal
 app.post("/extract-audio", async (req, res) => {
   try {
     const { videoUrl } = req.body;
@@ -26,62 +21,77 @@ app.post("/extract-audio", async (req, res) => {
       return res.status(400).json({ error: "videoUrl obrigatório" });
     }
 
-    // 🔥 1. TRANSCRIÇÃO COM OPENAI
+    // =============================
+    // 1. TRANSCRIÇÃO COM TIMESTAMP
+    // =============================
     const transcription = await axios.post(
       "https://api.openai.com/v1/audio/transcriptions",
       {
         file: videoUrl,
-        model: "gpt-4o-mini-transcribe"
+        model: "whisper-1",
+        response_format: "verbose_json"
       },
       {
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json"
         }
       }
     );
 
-    const texto = transcription.data.text || "Legenda não gerada";
+    const segments = transcription.data.segments;
 
-    // 🔥 2. RENDER COM SHOTSTACK
-    const shotstack = await axios.post(
+    // =============================
+    // 2. LEGENDAS SINCRONIZADAS
+    // =============================
+    const subtitles = segments.map(seg => ({
+      asset: {
+        type: "title",
+        text: seg.text.toUpperCase(),
+        style: "blockbuster",
+        size: "large",
+        color: "#ffffff",
+        stroke: "black",
+        background: "rgba(0,0,0,0.5)"
+      },
+      start: seg.start,
+      length: seg.end - seg.start,
+      position: "bottom"
+    }));
+
+    // =============================
+    // 3. CLIP DO VÍDEO
+    // =============================
+    const videoClip = {
+      asset: {
+        type: "video",
+        src: videoUrl
+      },
+      start: 0,
+      length: 60,
+      fit: "contain",
+      position: "center"
+    };
+
+    // =============================
+    // 4. ENVIAR PARA SHOTSTACK
+    // =============================
+    const shotstackResponse = await axios.post(
       "https://api.shotstack.io/v1/render",
       {
         timeline: {
           tracks: [
             {
-              clips: [
-                {
-                  asset: {
-                    type: "video",
-                    src: videoUrl
-                  },
-                  start: 0,
-                  length: 20,
-                  fit: "cover"
-                }
-              ]
+              clips: [videoClip]
             },
             {
-              clips: [
-                {
-                  asset: {
-                    type: "title",
-                    text: texto,
-                    style: "minimal",
-                    size: "medium",
-                    color: "#ffffff",
-                    background: "rgba(0,0,0,0.7)"
-                  },
-                  start: 0,
-                  length: 20,
-                  position: "bottom"
-                }
-              ]
+              clips: subtitles
             }
           ]
         },
         output: {
           format: "mp4",
+          aspectRatio: "9:16",
           resolution: "1080x1920"
         }
       },
@@ -94,19 +104,25 @@ app.post("/extract-audio", async (req, res) => {
     );
 
     res.json({
-      transcription: texto,
-      render: shotstack.data
+      success: true,
+      renderId: shotstackResponse.data.response.id
     });
 
-  } catch (err) {
-    console.error("Erro:", err.response?.data || err.message);
-    res.status(500).json({ error: "Erro no processamento" });
+  } catch (error) {
+    console.error("ERRO:", error.response?.data || error.message);
+
+    res.status(500).json({
+      error: "Erro no processamento",
+      details: error.response?.data || error.message
+    });
   }
 });
 
-// porta
+// =============================
+// SERVER
+// =============================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+  console.log("Servidor rodando na porta " + PORT);
 });
