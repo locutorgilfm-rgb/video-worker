@@ -27,8 +27,7 @@ function generateDynamicCuts(duration) {
   while (current < duration) {
     cuts.push({
       start: current,
-      length: Math.min(CUT_DURATION, duration - current),
-      zoom: Math.random() > 0.5 ? 1.1 : 1.05
+      length: Math.min(CUT_DURATION, duration - current)
     });
     current += CUT_DURATION;
   }
@@ -40,8 +39,9 @@ function generateDynamicCuts(duration) {
 async function processVideo(jobId, videoUrl) {
   try {
     console.log("🎬 Iniciando processamento...");
+    console.log("📹 URL recebida:", videoUrl);
 
-    const duration = 41; // 🔥 agora alinhado com seu vídeo
+    const duration = 41;
 
     const cuts = generateDynamicCuts(duration);
 
@@ -52,9 +52,7 @@ async function processVideo(jobId, videoUrl) {
       },
       start: cut.start,
       length: cut.length,
-      fit: "cover",
-      scale: cut.zoom,
-      position: "center"
+      fit: "cover"
     }));
 
     const response = await axios.post(
@@ -83,6 +81,8 @@ async function processVideo(jobId, videoUrl) {
 
     const renderId = response.data.response.id;
 
+    console.log("✅ Render criado:", renderId);
+
     updateJob(jobId, {
       status: "rendering",
       renderId
@@ -91,7 +91,9 @@ async function processVideo(jobId, videoUrl) {
     pollRender(jobId, renderId);
 
   } catch (err) {
-    console.error("❌ ERRO:", err.response?.data || err.message);
+    console.error("❌ ERRO COMPLETO:");
+    console.error(err.response?.data || err.message);
+
     updateJob(jobId, {
       status: "failed",
       error: err.response?.data || err.message
@@ -113,6 +115,8 @@ function pollRender(jobId, renderId) {
       );
 
       const status = res.data.response.status;
+
+      console.log("📊 Status:", status);
 
       if (status === "done") {
         updateJob(jobId, {
@@ -137,19 +141,16 @@ function pollRender(jobId, renderId) {
   }, 4000);
 }
 
-// 📥 ROTA PRINCIPAL
+// 📥 ROTA PRINCIPAL (🔥 COM TESTE FORÇADO)
 app.post("/extract-audio", (req, res) => {
-  const { videoUrl } = req.body;
-
-  if (!videoUrl) {
-    return res.status(400).json({ error: "videoUrl obrigatório" });
-  }
-
   const jobId = createJob();
 
-  processVideo(jobId, videoUrl);
+  // 🔥 TESTE COM VÍDEO PÚBLICO (REMOVE DEPOIS)
+  const videoUrlTeste = "https://cdn.shotstack.io/demo/city.mp4";
 
-  res.json({ jobId });
+  processVideo(jobId, videoUrlTeste);
+
+  return res.json({ jobId });
 });
 
 // 📊 STATUS
