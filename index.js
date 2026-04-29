@@ -18,10 +18,11 @@ function updateJob(id, data) {
   jobs.set(id, { ...jobs.get(id), ...data });
 }
 
-// 🚀 PROCESSAMENTO FUNCIONANDO 100%
-async function processVideo(jobId) {
+// 🚀 PROCESSAMENTO (AGORA USA O VIDEO DO USUÁRIO)
+async function processVideo(jobId, videoUrl) {
   try {
-    console.log("🎬 Iniciando processamento FIXO...");
+    console.log("🎬 Iniciando processamento...");
+    console.log("🎥 VIDEO RECEBIDO:", videoUrl);
 
     const response = await axios.post(
       "https://api.shotstack.io/edit/stage/render",
@@ -34,8 +35,7 @@ async function processVideo(jobId) {
                 {
                   asset: {
                     type: "video",
-                    // 🔥 VIDEO CORRIGIDO AQUI
-                    src: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/footage/beach.mp4"
+                    src: videoUrl // 🔥 VIDEO REAL DO USUÁRIO
                   },
                   start: 0,
                   length: 10,
@@ -71,8 +71,7 @@ async function processVideo(jobId) {
     pollRender(jobId, renderId);
 
   } catch (err) {
-    console.error("❌ ERRO REAL:");
-    console.error(JSON.stringify(err.response?.data, null, 2));
+    console.error("❌ ERRO:", err.response?.data || err.message);
 
     updateJob(jobId, {
       status: "failed",
@@ -121,17 +120,27 @@ function pollRender(jobId, renderId) {
   }, 4000);
 }
 
-// 📥 ROTA PRINCIPAL
+// 📥 ROTA PRINCIPAL (AGORA RECEBE videoUrl)
 app.post("/extract-audio", (req, res) => {
+  const { videoUrl } = req.body;
+
+  if (!videoUrl) {
+    return res.status(400).json({ error: "videoUrl obrigatório" });
+  }
+
   const jobId = createJob();
-  processVideo(jobId);
+
+  processVideo(jobId, videoUrl);
+
   res.json({ jobId });
 });
 
 // 📊 STATUS
 app.get("/job-status/:id", (req, res) => {
   const job = jobs.get(req.params.id);
+
   if (!job) return res.status(404).json({ error: "Job não encontrado" });
+
   res.json(job);
 });
 
