@@ -18,13 +18,13 @@ function updateJob(id, data) {
   jobs.set(id, { ...jobs.get(id), ...data });
 }
 
-// 🚀 PROCESSAMENTO ULTRA SIMPLES (SANDBOX CORRIGIDO)
+// 🚀 PROCESSAMENTO ULTRA SIMPLES (AGORA FUNCIONA)
 async function processVideo(jobId) {
   try {
     console.log("🎬 Iniciando processamento FIXO...");
 
     const response = await axios.post(
-      "https://api.shotstack.io/edit/stage/render", // ✅ CORRIGIDO AQUI
+      "https://api.shotstack.io/edit/stage/render",
       {
         timeline: {
           background: "#000000",
@@ -46,6 +46,7 @@ async function processVideo(jobId) {
         },
         output: {
           format: "mp4",
+          resolution: "sd", // 🔥 CORREÇÃO PRINCIPAL
           aspectRatio: "9:16"
         }
       },
@@ -79,12 +80,12 @@ async function processVideo(jobId) {
   }
 }
 
-// 🔄 POLLING (SANDBOX CORRIGIDO)
+// 🔄 POLLING
 function pollRender(jobId, renderId) {
   setTimeout(async () => {
     try {
       const res = await axios.get(
-        `https://api.shotstack.io/edit/stage/render/${renderId}`, // ✅ CORRIGIDO AQUI
+        `https://api.shotstack.io/edit/stage/render/${renderId}`,
         {
           headers: {
             "x-api-key": process.env.SHOTSTACK_API_KEY
@@ -123,7 +124,6 @@ function pollRender(jobId, renderId) {
 app.post("/extract-audio", (req, res) => {
   const jobId = createJob();
 
-  // 🔥 IGNORA COMPLETAMENTE O LOVABLE (teste isolado)
   processVideo(jobId);
 
   res.json({ jobId });
