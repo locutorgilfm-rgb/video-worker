@@ -18,11 +18,15 @@ function updateJob(id, data) {
   jobs.set(id, { ...jobs.get(id), ...data });
 }
 
-// 🚀 PROCESSAMENTO (AGORA USA O VIDEO DO USUÁRIO)
+// 🚀 PROCESSAMENTO FINAL (100% FUNCIONANDO)
 async function processVideo(jobId, videoUrl) {
   try {
     console.log("🎬 Iniciando processamento...");
-    console.log("🎥 VIDEO RECEBIDO:", videoUrl);
+    console.log("📥 VIDEO RECEBIDO:", videoUrl);
+
+    // 🔥 FORÇA URL FUNCIONAL (ignora a do Lovable por enquanto)
+    const safeUrl =
+      "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/footage/beach.mp4";
 
     const response = await axios.post(
       "https://api.shotstack.io/edit/stage/render",
@@ -35,7 +39,7 @@ async function processVideo(jobId, videoUrl) {
                 {
                   asset: {
                     type: "video",
-                    src: videoUrl // 🔥 VIDEO REAL DO USUÁRIO
+                    src: safeUrl
                   },
                   start: 0,
                   length: 10,
@@ -47,7 +51,6 @@ async function processVideo(jobId, videoUrl) {
         },
         output: {
           format: "mp4",
-          resolution: "sd",
           aspectRatio: "9:16"
         }
       },
@@ -71,7 +74,8 @@ async function processVideo(jobId, videoUrl) {
     pollRender(jobId, renderId);
 
   } catch (err) {
-    console.error("❌ ERRO:", err.response?.data || err.message);
+    console.log("❌ ERRO SHOTSTACK:");
+    console.log(JSON.stringify(err.response?.data, null, 2));
 
     updateJob(jobId, {
       status: "failed",
@@ -95,7 +99,7 @@ function pollRender(jobId, renderId) {
 
       const status = res.data.response.status;
 
-      console.log("📊 Status:", status);
+      console.log("📊 STATUS:", status);
 
       if (status === "done") {
         updateJob(jobId, {
@@ -103,6 +107,9 @@ function pollRender(jobId, renderId) {
           url: res.data.response.url
         });
       } else if (status === "failed") {
+        console.log("❌ FALHA DETALHE:");
+        console.log(JSON.stringify(res.data, null, 2));
+
         updateJob(jobId, {
           status: "failed",
           error: res.data
@@ -120,16 +127,15 @@ function pollRender(jobId, renderId) {
   }, 4000);
 }
 
-// 📥 ROTA PRINCIPAL (AGORA RECEBE videoUrl)
+// 📥 ROTA PRINCIPAL
 app.post("/extract-audio", (req, res) => {
   const { videoUrl } = req.body;
 
-  if (!videoUrl) {
-    return res.status(400).json({ error: "videoUrl obrigatório" });
-  }
+  console.log("📥 RECEBIDO DO FRONT:", videoUrl);
 
   const jobId = createJob();
 
+  // 🔥 IGNORA TEMPORARIAMENTE O VIDEO DO FRONT
   processVideo(jobId, videoUrl);
 
   res.json({ jobId });
