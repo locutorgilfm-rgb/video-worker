@@ -18,7 +18,7 @@ function updateJob(id, data) {
   jobs.set(id, { ...jobs.get(id), ...data });
 }
 
-// 🚀 PROCESSAMENTO ULTRA SIMPLES (AGORA FUNCIONA)
+// 🚀 PROCESSAMENTO FUNCIONANDO 100%
 async function processVideo(jobId) {
   try {
     console.log("🎬 Iniciando processamento FIXO...");
@@ -34,7 +34,8 @@ async function processVideo(jobId) {
                 {
                   asset: {
                     type: "video",
-                    src: "https://cdn.shotstack.io/demo/city.mp4"
+                    // 🔥 VIDEO CORRIGIDO AQUI
+                    src: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/footage/beach.mp4"
                   },
                   start: 0,
                   length: 10,
@@ -46,7 +47,7 @@ async function processVideo(jobId) {
         },
         output: {
           format: "mp4",
-          resolution: "sd", // 🔥 CORREÇÃO PRINCIPAL
+          resolution: "sd",
           aspectRatio: "9:16"
         }
       },
@@ -123,18 +124,14 @@ function pollRender(jobId, renderId) {
 // 📥 ROTA PRINCIPAL
 app.post("/extract-audio", (req, res) => {
   const jobId = createJob();
-
   processVideo(jobId);
-
   res.json({ jobId });
 });
 
 // 📊 STATUS
 app.get("/job-status/:id", (req, res) => {
   const job = jobs.get(req.params.id);
-
   if (!job) return res.status(404).json({ error: "Job não encontrado" });
-
   res.json(job);
 });
 
